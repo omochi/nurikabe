@@ -128,12 +128,7 @@ void CellInit(Cell *this){
 	this->chainNum = 1;
 }
 
-void CellGroupCopy(Cell *this,Cell *src){
-	this->group = src->group;
-	this->head = src->head;
-	this->chainNum = this->chainNum + src->chainNum;
-	src->chainNum = this->chainNum;
-}
+
 
 typedef struct{
 	int width;
@@ -141,21 +136,103 @@ typedef struct{
 	BoardData *data;
 	Cell *cells;
 	int nextGroup;
-	//Group *groups;
 }Board;
+void BoardCellSetColor(Board *this,int x,int y,CellColor color);
 
 Cell *BoardGetCellPtr(Board *this,int x,int y){
 	if(x<0 || this->width<=x || y<0 || this->height<=y)return NULL;
 	return &this->cells[y*this->width+x];
 }
 
-void BoardCellChangeGroup(Board *this,int from,int to){
+void BoardCellChangeGroup(Board *this,Cell *groupCell,int to,Point head){
+	int group = groupCell->group;
+	int iy,ix;
+	
+	if(group == 0){
+		groupCell->group = to;
+		groupCell ->head = head;
+		return;
+	}
+	
+	for(iy=0;iy<this->height;iy++){
+		for(ix=0;ix<this->width;ix++){
+			Cell *cell = BoardGetCellPtr(this,ix,iy);
+			if(cell->group == group){
+				cell->group = to;
+				cell->head = head;
+			}
+		}
+	}
+}
+
+void BoardCellGroupJoin(Board *this,Cell *lhs,Cell *rhs){
+	ASSERT(lhs->color == rhs->color);
+	//printf("join(%d) %d x %d\n",lhs->color,lhs->group,rhs->group);
+	if(lhs->color == CellColorBlack){
+		
+		
+		BoardCellChangeGroup(this,lhs,rhs->group,rhs->head);
+
+	}else if(lhs->color == CellColorWhite){
+		int leftValue = BoardDataGetData(this->data,lhs->head.x,lhs->head.y);
+		int rightValue = BoardDataGetData(this->data,rhs->head.x,rhs->head.y);
+		if(leftValue > 0 && rightValue ==0){
+			BoardCellChangeGroup(this,rhs,lhs->group,lhs->head);
+		}else if(leftValue ==0 && rightValue > 0){
+			
+			BoardCellChangeGroup(this,lhs,rhs->group,rhs->head);
+			
+		}else{
+			ASSERT(0);
+		}
+	}
+	
+	int chainNum = lhs->chainNum + rhs->chainNum;
+	lhs->chainNum = chainNum;
+	rhs->chainNum = chainNum;
+}
+
+
+void BoardCellSetBlackAroundWhite(Board *this,int group){
 	int iy,ix;
 	for(iy=0;iy<this->height;iy++){
 		for(ix=0;ix<this->width;ix++){
 			Cell *cell = BoardGetCellPtr(this,ix,iy);
-			if(cell->group == from){
-				cell->group = to;
+			if(cell->group == group){
+				
+				Cell *blk;
+				int x,y;
+				
+				x = ix - 1;
+				y = iy;
+				blk = BoardGetCellPtr(this,x,y);
+				if(blk && blk->color==CellColorGray){
+					BoardCellSetColor(this,x,y,CellColorBlack);
+				}
+
+				x = ix + 1;
+				y = iy;
+				blk = BoardGetCellPtr(this,x,y);
+				if(blk && blk->color==CellColorGray){
+					BoardCellSetColor(this,x,y,CellColorBlack);
+				}
+				
+				x = ix;
+				y = iy - 1;
+				blk = BoardGetCellPtr(this,x,y);
+				if(blk && blk->color==CellColorGray){
+					BoardCellSetColor(this,x,y,CellColorBlack);
+				}
+				
+				x = ix;
+				y = iy+1;
+				blk = BoardGetCellPtr(this,x,y);
+				if(blk && blk->color==CellColorGray){
+					BoardCellSetColor(this,x,y,CellColorBlack);
+				}
+				
+				
+				
 			}
 		}
 	}
@@ -164,44 +241,35 @@ void BoardCellChangeGroup(Board *this,int from,int to){
 
 //検査無し
 void BoardCellSetColor(Board *this,int x,int y,CellColor color){
+
+	
 	Cell *cell = BoardGetCellPtr(this,x,y);
 	cell->color = color;
+	
+	printf("(%d,%d) = %d\n",x,y,color);
 	
 	int found = 0;
 	
 	Cell *chk = BoardGetCellPtr(this,x-1,y);
 	if(chk && chk->color==color){
-		CellGroupCopy(cell,chk);
-		found = 1;
+		BoardCellGroupJoin(this,cell,chk);
+		found ++;
 	}
 	
 	chk = BoardGetCellPtr(this,x,y-1);
 	if(chk && chk->color==color){
-		CellGroupCopy(cell,chk);
-		if(found){
-			BoardCellChangeGroup(this,chk->group,cell->group);
-		}else{
-			
-			found = 1;
-		}
+		BoardCellGroupJoin(this,cell,chk);
+		found ++;
 	}
 	chk = BoardGetCellPtr(this,x+1,y);
 	if(chk && chk->color==color){
-		CellGroupCopy(cell,chk);
-		if(found){
-			BoardCellChangeGroup(this,chk->group,cell->group);
-		}else{
-			found = 1;		
-		}
+		BoardCellGroupJoin(this,cell,chk);
+		found++;
 	}
 	chk = BoardGetCellPtr(this,x,y+1);
 	if(chk && chk->color==color){
-		CellGroupCopy(cell,chk);
-		if(found){
-			BoardCellChangeGroup(this,chk->group,cell->group);
-		}else{
-			found = 1;		
-		}
+		BoardCellGroupJoin(this,cell,chk);
+		found++;
 	}
 	
 	if(found==0){
@@ -213,6 +281,94 @@ void BoardCellSetColor(Board *this,int x,int y,CellColor color){
 		
 		this->nextGroup ++;
 	}
+	
+	
+	int value = BoardDataGetData(this->data,cell->head.x,cell->head.y);
+	//ホワイト塗り終わりの周り黒確定
+	if(cell->color == CellColorWhite && cell->chainNum == value){
+		BoardCellSetBlackAroundWhite(this,cell->group);
+	}
+	
+}
+
+//ぬれた数
+int BoardCellSetBlackSplitWhite(Board *this){
+	int iy,ix;
+	int num = 0;
+	for(iy =0;iy<this->height;iy++){
+		for(ix = 0;ix<this->width;ix++){
+			Cell *cell = BoardGetCellPtr(this,ix,iy);
+			if(cell->color == CellColorGray){
+				//白の分割が必要な部分なら
+				
+				int group = 0;
+				
+				Cell *chk;
+				
+				int x,y;
+				
+				x=ix-1;
+				y =iy;
+				chk = BoardGetCellPtr(this,x,y);
+				if(chk && chk->color == CellColorWhite){
+					if(group == 0){
+						group = chk->group;
+					}else if(group != chk->group){
+						//分割の必要あり
+						BoardCellSetColor(this,ix,iy,CellColorBlack);
+						num ++ ;
+						continue;
+					}
+				}
+				
+				x=ix+1;
+				y =iy;
+				chk = BoardGetCellPtr(this,x,y);
+				if(chk && chk->color == CellColorWhite){
+					if(group == 0){
+						group = chk->group;
+					}else if(group != chk->group){
+						//分割の必要あり
+						BoardCellSetColor(this,ix,iy,CellColorBlack);
+						num++;
+						continue;
+					}
+				}
+				
+				x=ix;
+				y =iy-1;
+				chk = BoardGetCellPtr(this,x,y);
+				if(chk && chk->color == CellColorWhite){
+					if(group == 0){
+						group = chk->group;
+					}else if(group != chk->group){
+						//分割の必要あり
+						BoardCellSetColor(this,ix,iy,CellColorBlack);
+						num++;
+						continue;
+					}
+				}
+				
+				x=ix;
+				y =iy+1;
+				chk = BoardGetCellPtr(this,x,y);
+				if(chk && chk->color == CellColorWhite){
+					if(group == 0){
+						group = chk->group;
+					}else if(group != chk->group){
+						//分割の必要あり
+						BoardCellSetColor(this,ix,iy,CellColorBlack);
+						num++;
+						continue;
+					}
+				}
+				
+				
+				
+			}
+		}
+	}
+	return num;
 	
 }
 
@@ -228,16 +384,19 @@ void BoardInitWithData(Board *this,BoardData *data){
 		for(ix = 0;ix<this->width;ix++){
 			Cell *cell = BoardGetCellPtr(this,ix,iy);
 			CellInit(cell);
-			
-			//確定塗り
+		}
+	}
+	
+	for(iy =0;iy<this->height;iy++){
+		for(ix = 0;ix<this->width;ix++){
+			//数字セルは白確定する
 			int v = BoardDataGetData(this->data,ix,iy);
 			if(v>0){
-				
 				BoardCellSetColor(this,ix,iy,CellColorWhite);
-				
 			}
 		}
 	}
+	
 }
 void BoardInitWithBoard(Board *this,Board *src){
 	int iy,ix;
@@ -286,6 +445,71 @@ void BoardPrint(Board *this){
 	}
 }
 
+int BoardIsSolved(Board *this){
+	int iy,ix;
+	
+	int blackGroup = 0;
+	
+	for(iy=0;iy<this->height;iy++){
+		for(ix=0;ix<this->width;ix++){
+			Cell *cell = BoardGetCellPtr(this,ix,iy);
+			int value = BoardDataGetData(this->data,cell->head.x,cell->head.y);
+			//白の長さが正しい
+			if(cell->color == CellColorWhite){
+				if(cell->chainNum != value){
+					printf("white num %d != %d (%d,%d)\n",cell->chainNum,value,ix,iy);
+					return 0;
+				}
+			}else if(cell->color ==CellColorBlack){
+				//黒が1連結
+				if(blackGroup == 0){
+					blackGroup = cell->group;
+				}else{
+					if(blackGroup != cell->group){
+						printf("black group over\n");
+						return 0;
+					}
+				}
+			}else if(cell->color ==CellColorGray){
+				printf("there is gray(%d,%d)\n",ix,iy);
+				//塗り終わっていない
+				return 0;
+			}
+		}
+	}
+	
+	return 1;
+}
+
+//0:fail 1:solved
+int solve(Board *board,int depth){
+	while(1){
+		int num = 0;
+		
+		num = BoardCellSetBlackSplitWhite(board);
+		if(num > 0){
+			printf("depth %d , split white\n",depth);
+			BoardPrint(board);
+			continue;
+			
+		}
+		
+		
+		
+		//できる事がない
+		break;
+	}
+	
+	if(BoardIsSolved(board)){
+		printf("depth %d , solved\n",depth);
+		return 1;
+	}else{
+		printf("depth %d , failed\n",depth);
+		return 0;
+	}
+
+}
+
 int main(int argc,char *argv[]){
 	if(argc<2){
 		printf("usage:%s file\n",argv[0]);
@@ -293,12 +517,16 @@ int main(int argc,char *argv[]){
 	}
 	BoardData bData;
 	BoardDataInitWithLoadFile(&bData,argv[1]);
-	BoardDataPrint(&bData);
+
 	printf("\n");
 	
 	Board board;
 	BoardInitWithData(&board,&bData);
-	BoardPrint(&board);
+
+	
+	solve(&board,0);
+	
+
 	
 	return EXIT_SUCCESS;
 }
