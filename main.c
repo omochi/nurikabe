@@ -106,6 +106,33 @@ void PointInit(Point *this){
 	this->x = -1;
 	this->y = 0;
 }
+int PointCmp(Point *this,Point *rhs){
+	if(this->x < rhs->x){
+		return -1;
+	}else if(this->x > rhs->x){
+		return 1;
+	}else{
+		
+		if(this->y < rhs->y){
+			return -1;
+		}else if(this->y > rhs->y){
+			return 1;
+		}else{
+			
+			return 0;
+		}
+		
+		
+	}
+	
+}
+
+Point PointMake(int x,int y){
+	Point p;
+	p.x = x;
+	p.y = y;
+	return p;
+}
 
 typedef enum{
 	CellColorGray = 0,
@@ -114,6 +141,7 @@ typedef enum{
 }CellColor;
 
 typedef struct{
+
 	CellColor color;
 	int group;
 
@@ -372,6 +400,137 @@ int BoardCellSetBlackSplitWhite(Board *this){
 	
 }
 
+//caller should release
+Point * BoardAllocPointArray(Board *this){
+	Point *array = malloc(sizeof(Point) * this->width * this->height);
+	return array;
+}
+int * BoardAllocGroupArray(Board *this){
+	int *array = malloc(sizeof(int)*this->width*this->height);
+	return array;
+}
+
+
+//nは更新される
+void PointArrayAddUnique(Point *array,int *n,Point add){
+	//同じ座標は追加しない
+	int i;
+	for(i=0;i<*n;i++){
+
+		if(PointCmp(&array[i],&add)==0)return;
+	}
+	array[*n] = add;
+	*n = *n + 1;
+}
+
+void GroupArrayAddUnique(int *array,int *n,int grp){
+	int i;
+	for(i=0;i<*n;i++){
+		if(array[i] == grp)return;
+	}
+	array[*n] = grp;
+	*n = *n +1;
+}
+
+//ある色のグループ一覧を取る
+int BoardGetGroupsWithColor(Board *this,int *result,int *retNum,int color){
+	int iy,ix;
+	int num = 0;
+	for(iy = 0;iy<this->height;iy++){
+		for(ix=0;ix<this->width;ix++){
+			Cell *cell = BoardGetCellPtr(this,ix,iy);
+			if(cell->color == color){
+				GroupArrayAddUnique(result,&num,cell->group);
+			}
+		}		
+	}
+	*retNum = num;
+	return num;
+}
+
+//グループの周りの色のリストを返す
+int BoardGetGroupAroundColor(Board *this,Point *result,int *retNum,int group,int color){
+	int iy,ix;
+	int num = 0;
+	for(iy = 0;iy<this->height;iy++){
+		for(ix=0;ix<this->width;ix++){
+			Cell *cell = BoardGetCellPtr(this,ix,iy);
+			//4方向足す
+			if(cell->group == group){
+				
+				Cell *chk;
+				int x,y;
+				x = ix-1;
+				y = iy;
+				chk = BoardGetCellPtr(this,x,y);
+				if(chk && chk->color == color){
+					PointArrayAddUnique(result,&num,PointMake(x,y));
+				}
+				
+				x = ix;
+				y = iy-1;
+				chk = BoardGetCellPtr(this,x,y);
+				if(chk && chk->color == color){
+					PointArrayAddUnique(result,&num,PointMake(x,y));
+				}
+				
+				x = ix+1;
+				y = iy;
+				chk = BoardGetCellPtr(this,x,y);
+				if(chk && chk->color == color){
+					PointArrayAddUnique(result,&num,PointMake(x,y));
+				}
+				
+				x = ix;
+				y = iy+1;
+				chk = BoardGetCellPtr(this,x,y);
+				if(chk && chk->color == color){
+					PointArrayAddUnique(result,&num,PointMake(x,y));
+				}
+				
+			}
+		}		
+	}
+	
+	*retNum = num;
+	return num;
+	
+}
+
+
+
+int BoardCellExpandWhite(Board *this){
+	int num = 0;
+	
+	int *groups = BoardAllocGroupArray(this);
+	int groupsLen = 0;
+	Point *points = BoardAllocPointArray(this);
+	int pointsLen = 0;
+	
+	
+	BoardGetGroupsWithColor(this,groups,&groupsLen,CellColorWhite);
+	int i;
+	for(i=0;i<groupsLen;i++){
+		int grp = groups[i];
+		
+		BoardGetGroupAroundColor(this,points,&pointsLen,grp,CellColorGray);
+		if(pointsLen == 1){
+			//一個だった場合は確定なので進める
+			int x = points[0].x;
+			int y = points[0].y;
+			printf("one way black (grp %d) -> (%d,%d)\n",grp,x,y);
+			
+			BoardCellSetColor(this,x,y,CellColorWhite);
+			num++;
+		}
+	}
+	
+	SAFE_FREE(points);
+	SAFE_FREE(groups);
+	
+	return num;
+}
+
 void BoardInitWithData(Board *this,BoardData *data){
 	int iy,ix;
 	this->width = data->width;
@@ -494,6 +653,12 @@ int solve(Board *board,int depth){
 			
 		}
 		
+		num = BoardCellExpandWhite(board);
+		if(num > 0){
+			printf("depth %d , expand black\n",depth);
+			BoardPrint(board);
+			continue;
+		}
 		
 		
 		//できる事がない
