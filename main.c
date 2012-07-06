@@ -37,7 +37,14 @@ typedef enum{
 	CellColorBlack = 4
 }CellColor;
 
-typedef struct{
+typedef enum{
+	BoardPrintChain = 1,
+}BoardPrintFlag;
+
+struct Cell_t;
+typedef struct Cell_t Cell;
+
+struct Cell_t{
 	Point pos;//あーやっぱ必要になった。
 	
 	CellColor color;
@@ -48,7 +55,8 @@ typedef struct{
 	
 	int mark;
 	int dist;
-}Cell;
+	Cell *markCell;
+};
 
 typedef struct{
 	int width;
@@ -59,6 +67,8 @@ typedef struct{
 	
 	int error;
 	int depth;
+	
+	int printFlag;
 }Board;
 
 int silent = 0;
@@ -69,10 +79,12 @@ void BoardRelease(Board *this);
 void BoardCellSetColor(Board *this,int x,int y,CellColor color);
 void BoardIndent(Board *this);
 void BoardPrint(Board *this);
+void BoardPrintDist(Board *this);
 int BoardCellWhiteGroupRemain(Board *this,Cell *cell);
 int BoardCellCheckThreeColor(Board *this,Point p0,Point p1,Point p2,int color);
 void BoardGetCellAreaByColor(Board *this,Cell **result,int *resultLen,Cell *cell,int color);
 int BoardGetCellsOfGroupAroundColor(Board *this,Cell **result,int *num,int group,int color);
+int BoardCellWhiteGroupRemain(Board *this,Cell *cell);
 //ここまでヘッダ
 
 
@@ -279,6 +291,7 @@ void CellInit(Cell *this,int x,int y){
 	this->chainNum = 1;
 	this->mark = 0;
 	this->dist = 0;
+	this->markCell = NULL;
 }
 
 
@@ -330,7 +343,16 @@ void BoardCellGroupJoin(Board *this,Cell *lhs,Cell *rhs){
 	ASSERT(lhs->color == rhs->color);
 	ASSERT(lhs->color != CellColorGray);
 	
-	if(lhs->group == rhs->group)return;
+	if(lhs->group == rhs->group){
+
+		//BoardIndent(this);
+		///printf("group same join(%d) grp=%d(%d,%d) x grp=%d(%d,%d)\n",lhs->color,
+		//	   lhs->group,lhs->pos.x,lhs->pos.y,
+		//	   rhs->group,rhs->pos.x,rhs->pos.y);
+		//BoardPrint(this);
+
+		return ;
+	}
 	
 	int chainNum = lhs->chainNum + rhs->chainNum;
 	
@@ -340,6 +362,7 @@ void BoardCellGroupJoin(Board *this,Cell *lhs,Cell *rhs){
 		BoardCellChangeGroup(this,lhs,rhs->group,rhs->head,chainNum);
 
 	}else if(lhs->color == CellColorWhite){
+		
 		int leftValue = BoardGetCellHeadData(this,lhs);
 		int rightValue = BoardGetCellHeadData(this,rhs);
 		if(leftValue > 0 && rightValue ==0){
@@ -598,14 +621,12 @@ int BoardCellSetWhiteByBlack2x2(Board *this){
 			if(cell->color == CellColorGray){
 				//右下の白確定
 				if(BoardCellCheckThreeColor(this,PointMake(ix-1,iy),PointMake(ix-1,iy-1),PointMake(ix,iy-1),CellColorBlack)){
-	//				printf("black2x2 white right down(%d,%d)\n",ix,iy);
 					BoardCellSetColor(this,ix,iy,CellColorWhite);
 					num++;
 					continue;
 				}
 				//右上の白
 				if(BoardCellCheckThreeColor(this,PointMake(ix-1,iy),PointMake(ix-1,iy+1),PointMake(ix,iy+1),CellColorBlack)){
-	//				printf("black2x2 white right up(%d,%d)\n",ix,iy);
 					BoardCellSetColor(this,ix,iy,CellColorWhite);
 					num++;
 					continue;
@@ -613,19 +634,16 @@ int BoardCellSetWhiteByBlack2x2(Board *this){
 				
 				//左下の白
 				if(BoardCellCheckThreeColor(this,PointMake(ix,iy-1),PointMake(ix+1,iy-1),PointMake(ix+1,iy),CellColorBlack)){
-	//				printf("black2x2 white left down(%d,%d)\n",ix,iy);
 					BoardCellSetColor(this,ix,iy,CellColorWhite);
 					num++;
 					continue;
 				}
 				//左上の白
 				if(BoardCellCheckThreeColor(this,PointMake(ix,iy+1),PointMake(ix+1,iy+1),PointMake(ix+1,iy),CellColorBlack)){
-	//				printf("black2x2 white left up(%d,%d)\n",ix,iy);
 					BoardCellSetColor(this,ix,iy,CellColorWhite);
 					num++;
 					continue;
 				}
-				
 				
 			}
 		}
@@ -696,6 +714,7 @@ int BoardCellIsValueWhite(Board *this,Cell *cell){
 	PointCmp(&cell->pos,&cell->head)==0 ; 
 }
 
+
 //到達可能な数値セルを引っ張る
 void BoardGetReachableWhiteHeadCells(Board *this,Cell **array,int *n,Cell *from){
 	*n = 0;
@@ -749,15 +768,28 @@ void BoardClearCellMark(Board *this){
 		for(ix=0;ix<this->width;ix++){
 			Cell *cell = BoardGetCellPtr(this,ix,iy);
 			cell->mark = 0;
+			cell->markCell = NULL;
 		}
+	}
+}
+
+void BoardSetCellMarkUniqueGroup(Board *this,Cell *cell,Cell *mark){
+	if(cell->markCell!=NULL && cell->markCell->group == mark->group){
+		//すでにマークされていて、グループが同じならマークしない
+	}else{
+		//そうでなければ
+		cell->markCell = mark;
+		cell->mark ++;
 	}
 }
 
 //ダイクストラ法
 //スレッショルドより先は調べない
 //到達セルにmark++を付ける
+//ただしマークはグループ数だけつける
 void BoardCalcCellDistance(Board *this,Cell *from,int threshold){
 	from->dist = 1;
+	BoardSetCellMarkUniqueGroup(this,from,from);
 	
 	Cell **open = BoardAllocCellPtrArray(this);
 	int openLen  =0;
@@ -775,7 +807,7 @@ void BoardCalcCellDistance(Board *this,Cell *from,int threshold){
 		chk = BoardGetCellPtr(this,cell->pos.x-1,cell->pos.y+0);
 		if(chk && chk->color & (CellColorGray | CellColorWhite) && chk->dist == 0){
 			chk->dist = cell->dist + 1;
-			chk->mark++;
+			BoardSetCellMarkUniqueGroup(this,chk,from);
 			if(chk->dist < threshold){
 				int idx = CellPtrArrayFindByDist(open,&openLen,chk->dist+1);
 				if(idx==-1)idx = openLen;
@@ -785,7 +817,7 @@ void BoardCalcCellDistance(Board *this,Cell *from,int threshold){
 		chk = BoardGetCellPtr(this,cell->pos.x+1,cell->pos.y+0);
 		if(chk && chk->color & (CellColorGray | CellColorWhite) && chk->dist == 0){
 			chk->dist = cell->dist + 1;
-			chk->mark++;
+			BoardSetCellMarkUniqueGroup(this,chk,from);
 			if(chk->dist < threshold){
 				int idx = CellPtrArrayFindByDist(open,&openLen,chk->dist+1);
 				if(idx==-1)idx = openLen;
@@ -795,7 +827,7 @@ void BoardCalcCellDistance(Board *this,Cell *from,int threshold){
 		chk = BoardGetCellPtr(this,cell->pos.x+0,cell->pos.y-1);
 		if(chk && chk->color & (CellColorGray | CellColorWhite) && chk->dist == 0){
 			chk->dist = cell->dist + 1;
-			chk->mark++;
+			BoardSetCellMarkUniqueGroup(this,chk,from);
 			if(chk->dist < threshold){
 				int idx = CellPtrArrayFindByDist(open,&openLen,chk->dist+1);
 				if(idx==-1)idx = openLen;
@@ -805,7 +837,7 @@ void BoardCalcCellDistance(Board *this,Cell *from,int threshold){
 		chk = BoardGetCellPtr(this,cell->pos.x+0,cell->pos.y+1);
 		if(chk && chk->color & (CellColorGray | CellColorWhite) && chk->dist == 0){
 			chk->dist = cell->dist + 1;
-			chk->mark++;
+			BoardSetCellMarkUniqueGroup(this,chk,from);
 			if(chk->dist < threshold){
 				int idx = CellPtrArrayFindByDist(open,&openLen,chk->dist+1);
 				if(idx==-1)idx = openLen;
@@ -848,32 +880,14 @@ int BoardCellSetBlackSurroundedGray(Board *this){
 				int i;
 				for(i=0;i<cellsLen;i++)cells[i]->mark = 1;
 				
-				/*
-				if(cellsLen <= 3){
-					BoardIndent(&test);
-					printf("gray area %d (%d,%d) \n",cellsLen,ix,iy);
-					BoardPrint(&test);
-					getchar();
-					
-				}
-				 */
-				
 				//隣接の白を探す
 				if(!BoardCellsHasArroundColor(&test,cells,&cellsLen,CellColorWhite)){
 					
-					//BoardIndent(&test);
-					//printf("surrounded gray! cellNum:%d (%d,%d)\n",cellsLen,ix,iy);
-					//BoardPrint(&test);
-					
-					//getchar();
 					for(i=0;i<cellsLen;i++){
 						//ここでthisの方を塗る
 						BoardCellSetColor(this,cells[i]->pos.x,cells[i]->pos.y,CellColorBlack);
 						num++;
-						if(this->error){
-						//	getchar();
-							goto forend;
-						}
+						if(this->error)goto forend;
 					}
 					
 					
@@ -962,56 +976,6 @@ int BoardGetCellsOfGroupAroundColor(Board *this,Cell **result,int *num,int group
 	return *num;
 }
 
-//グループの周りの色のリストを返す
-/*
-int BoardGetGroupAroundColor(Board *this,Point *result,int *retNum,int group,int color){
-	int iy,ix;
-	int num = 0;
-	for(iy = 0;iy<this->height;iy++){
-		for(ix=0;ix<this->width;ix++){
-			Cell *cell = BoardGetCellPtr(this,ix,iy);
-			//4方向足す
-			if(cell->group == group){
-				
-				Cell *chk;
-				int x,y;
-				x = ix-1;
-				y = iy;
-				chk = BoardGetCellPtr(this,x,y);
-				if(chk && chk->color == color){
-					PointArrayAddUnique(result,&num,PointMake(x,y));
-				}
-				
-				x = ix;
-				y = iy-1;
-				chk = BoardGetCellPtr(this,x,y);
-				if(chk && chk->color == color){
-					PointArrayAddUnique(result,&num,PointMake(x,y));
-				}
-				
-				x = ix+1;
-				y = iy;
-				chk = BoardGetCellPtr(this,x,y);
-				if(chk && chk->color == color){
-					PointArrayAddUnique(result,&num,PointMake(x,y));
-				}
-				
-				x = ix;
-				y = iy+1;
-				chk = BoardGetCellPtr(this,x,y);
-				if(chk && chk->color == color){
-					PointArrayAddUnique(result,&num,PointMake(x,y));
-				}
-				
-			}
-		}		
-	}
-	
-	*retNum = num;
-	return num;
-	
-}
-*/
 
 int BoardCellExpandWhite(Board *this){
 	int num = 0;
@@ -1038,27 +1002,7 @@ int BoardCellExpandWhite(Board *this){
 			
 			BoardCellSetColor(this,x,y,CellColorWhite);
 			num++;
-		}else if(aroundsLen == 0){
-			//詰みパターン検出
-			
-			int value = BoardGetCellHeadData(this,grpCell);
-			int rem = value - grpCell->chainNum;
-			
-			if(value==0 || rem>0){
-				//数字なし白が閉じ込められているか、数字ありで面積不足
-				this->error = 1;
-				BoardIndent(this);
-				printf("white lock error! grp=%d (%d,%d)\n",grpCell->group , grpCell->head.x,grpCell->head.y);
-				BoardPrint(this);
-				break;
-			}
-			
 		}
-		
-
-		
-		
-		
 	}
 	
 	SAFE_FREE(arounds);
@@ -1090,12 +1034,6 @@ int BoardCellExpandBlack(Board *this){
 			if(aroundsLen == 1){
 				int x = arounds[0]->pos.x;
 				int y = arounds[0]->pos.y;
-				
-				//BoardPrint(this);
-				
-				//BoardIndent(this);
-				//printf("one way black (grp %d) -> (%d,%d)\n",grpCell->group,x,y);
-				
 				
 				BoardCellSetColor(this,x,y,CellColorBlack);
 				num++;
@@ -1160,6 +1098,52 @@ checkend:
 
 }
 
+void BoardCheckWhiteSplit(Board *this){
+	//飛び地グルーピングの到達性確認
+	int iy,ix;
+	int jy,jx;
+
+	for(iy=0;iy<this->height;iy++){
+		for(ix=0;ix<this->width;ix++){
+			Cell *headCell = BoardGetCellPtr(this,ix,iy);
+			if(BoardCellIsValueWhite(this,headCell)){
+				BoardClearCellMark(this);
+				BoardClearCellDist(this);
+				
+				BoardCalcCellDistance(this,headCell,BoardGetCellHeadData(this,headCell));
+
+				for(jy=0;jy<this->height;jy++){
+					for(jx=0;jx<this->width;jx++){
+						Cell *cell = BoardGetCellPtr(this,jx,jy);
+						if(cell->group == headCell->group &&
+						   cell->mark == 0){
+							
+							BoardIndent(this);
+							printf("cant reach self head (%d,%d) -> (%d,%d) error\n",
+								   cell->pos.x,cell->pos.y,headCell->pos.x,headCell->pos.y);
+							BoardPrint(this);
+							//BoardPrintDist(this);
+							
+							
+							//getchar();
+							
+							this->error = 1;
+							goto exit;
+							
+		
+						}
+					}
+				}
+
+			}
+		}
+	}
+exit:
+	return;
+	
+}
+
+
 int BoardCellAreaExpandWhite(Board *this){
 	int num = 0;
 	
@@ -1176,56 +1160,40 @@ int BoardCellAreaExpandWhite(Board *this){
 		Cell *grpCell = groups[i];
 		cellsLen = 0;
 		int value = BoardGetCellHeadData(this,grpCell);
-		if(value == 0){
-			//数字無し白からのチェック
-			
-			BoardGetReachableWhiteHeadCells(this,cells,&cellsLen,grpCell);
-			//printf("no value white call reach %d value white (%d,%d)\n",cellsLen,grpCell->pos.x,grpCell->pos.y);
-			if(cellsLen == 0){
-				BoardIndent(this);
-				printf("no value white cell cant reach value white (%d,%d)\n",grpCell->pos.x,grpCell->pos.y);
-				BoardPrint(this);
-				
-				//getchar();
-				this->error = 1;
-				break;
-			}
-			
-			
-		}else{
-			//数字セルからの拡張チェック
+		if(value ==0)continue;
 		
-			int rem = value - grpCell->chainNum;
-			if(rem == 0)continue;
-			//グループの周りの白と灰色
-			//白なのでグループ自身もカウントされる
-			BoardGetCellAreaOfGroupAroundColor(this,cells,&cellsLen,grpCell->group,CellColorGray | CellColorWhite);
-			
-			if(cellsLen == value){
-				//充填確定
-				//BoardIndent(this);
-				//printf("white cell area fixed! num=%d , grp=%d(%d,%d)\n",cellsLen,grpCell->group,grpCell->pos.x,grpCell->pos.y);
-				//BoardPrint(this);
+	
+		
+		int rem = value - grpCell->chainNum;
+		if(rem == 0)continue;
+		//グループの周りの白と灰色
+		//白なのでグループ自身もカウントされる
+		BoardGetCellAreaOfGroupAroundColor(this,cells,&cellsLen,grpCell->group,CellColorGray | CellColorWhite);
+		
+		if(cellsLen == value){
+			//充填確定
+			//BoardIndent(this);
+			//printf("white cell area fixed! num=%d , grp=%d(%d,%d)\n",cellsLen,grpCell->group,grpCell->pos.x,grpCell->pos.y);
+			//BoardPrint(this);
 
-				int ci;
-				for(ci = 0; ci<cellsLen;ci++){
-					BoardCellSetColor(this,cells[ci]->pos.x,cells[ci]->pos.y,CellColorWhite);
-				}
-				num += cellsLen;
-				
-			}else if(cellsLen < value){
-				//不足確定
-				BoardIndent(this);
-				printf("white cell area is lacking!! value=%d , area=%d , grp=%d(%d,%d)\n",
-					   value,cellsLen,grpCell->group,grpCell->pos.x,grpCell->pos.y);
-				BoardPrint(this);
-				
-				this->error = 1;
-				break;
-				
+			int ci;
+			for(ci = 0; ci<cellsLen;ci++){
+				BoardCellSetColor(this,cells[ci]->pos.x,cells[ci]->pos.y,CellColorWhite);
 			}
+			num += cellsLen;
+			
+		}else if(cellsLen < value){
+			//不足確定
+			BoardIndent(this);
+			printf("white cell area is lacking!! value=%d , area=%d , grp=%d(%d,%d)\n",
+				   value,cellsLen,grpCell->group,grpCell->pos.x,grpCell->pos.y);
+			BoardPrint(this);
+			
+			this->error = 1;
+			break;
 			
 		}
+	
 	}
 	
 	SAFE_FREE(cells);
@@ -1235,9 +1203,6 @@ int BoardCellAreaExpandWhite(Board *this){
 
 int BoardCellSetBlackUnreachable(Board *this){
 	int num = 0;
-	//Board test;
-	///BoardInitWithBoard(&test,this);
-	//BoardClearCellMark(&test);
 	
 	BoardClearCellDist(this);
 	BoardClearCellMark(this);
@@ -1246,8 +1211,7 @@ int BoardCellSetBlackUnreachable(Board *this){
 	for(iy=0;iy<this->height;iy++){
 		for(ix=0;ix<this->width;ix++){
 			Cell *cell = BoardGetCellPtr(this,ix,iy);
-			
-			
+						
 			if(cell->color == CellColorWhite){
 				int value = BoardGetCellHeadData(this,cell);
 				if(value != 0){
@@ -1255,24 +1219,9 @@ int BoardCellSetBlackUnreachable(Board *this){
 					
 					BoardClearCellDist(this);
 					BoardCalcCellDistance(this,cell,1+rem);
-
-					
-					
-					
 				}
-				
-				
 			}
 			 
-			/*
-			if(BoardCellIsValueWhite(this,cell)){
-				BoardClearCellDist(this);
-				BoardCalcCellDistance(this,cell,BoardGetCellHeadData(this,cell));
-			}
-			 */
-			
-
-			
 		}
 	}
 	
@@ -1280,21 +1229,50 @@ int BoardCellSetBlackUnreachable(Board *this){
 		for(ix=0;ix<this->width;ix++){
 			Cell *cell = BoardGetCellPtr(this,ix,iy);
 			if(cell->color == CellColorGray && cell->mark ==0){
-				BoardIndent(this);
-				printf("unreachable gray cell (%d,%d)\n",ix,iy);
-				BoardPrint(this);
+				//BoardIndent(this);
+				//printf("unreachable gray cell (%d,%d)\n",ix,iy);
+				//BoardPrint(this);
 				
 				BoardCellSetColor(this,ix,iy,CellColorBlack);
 				num ++ ;
-				
-				//getchar();
+			}else if(cell->color == CellColorWhite && BoardGetCellHeadData(this,cell)==0){
+				if(cell->mark == 0){
+					this->error = 1;
+					BoardIndent(this);
+					printf("unreachable no value white cell (%d,%d)\n",ix,iy);
+					BoardPrint(this);
+					//getchar();
+					goto endchk;
+				}else if(cell->mark == 1){
+					//到達グループが一つしかないなら！
+					Cell *markCell = cell->markCell;
+					ASSERT(markCell!=NULL);
+					
+					
+					
+					BoardIndent(this);
+					printf("found only reachable white group connect grp=%d(%d,%d) -- (%d,%d)\n",
+						   markCell->group,markCell->pos.x,markCell->pos.y,
+						   ix,iy						   );
+					BoardPrint(this);
+
+					//連続しないが同じグループとする！
+					//BoardCellGroupJoin(this,markCell,cell);
+					
+					BoardCellChangeGroup(this,cell,markCell->group,markCell->head,markCell->chainNum + cell->chainNum);
+					num ++;
+					
+					BoardPrint(this);
+					//getchar();
+					goto endchk;
+				}
 			}
-			
 		}
 	}
-	
-	
-	//BoardRelease(&test);
+endchk:
+		
+	BoardClearCellDist(this);
+	BoardClearCellMark(this);
 	
 	return num;
 }
@@ -1336,6 +1314,7 @@ void BoardInitWithBoard(Board *this,Board *src){
 	this->data = src->data;
 	this->error = src->error;
 	this->depth = src->depth;
+	this->printFlag = src->printFlag;
 	this->cells = malloc(sizeof(Cell) * this->width * this->height);
 	for(iy =0;iy<this->height;iy++){
 		for(ix = 0;ix<this->width;ix++){
@@ -1362,7 +1341,9 @@ void BoardIndent(Board *this){
 	}
 }
 
-void BoardPrint(Board *this){
+
+
+void BoardPrintWithFlag(Board *this,int flags){
 	int iy,ix;
 	
 	if(silent)return;
@@ -1371,37 +1352,75 @@ void BoardPrint(Board *this){
 	BoardIndent(this);
 	printf("    |");
 	for(ix=0;ix<this->width;ix++){
-		printf("   %2d |",ix);
+		if(flags & BoardPrintChain){
+			printf("     %2d   |",ix);
+		}else{
+			printf("   %2d |",ix);
+		}
 	}
 	printf("\n");
 
-	
-	for(iy=0;iy<this->height;iy++){
-		BoardIndent(this);
-		printf(" %2d |",iy);
-		for(ix=0;ix<this->width;ix++){
-			Cell *cell = BoardGetCellPtr(this,ix,iy);
-			if(cell->color == CellColorGray){
-				printf("  (%3d)",cell->group);
-			}else if(cell->color == CellColorWhite){
-				if(BoardCellIsCompletedWhite(this,cell)){
-					printf("%2d(%3d)",cell->chainNum,cell->group);
-				}else{
-					int v = BoardDataGetData(this->data,ix,iy);
-					if(v == 0){
-						printf(" .(%3d)",cell->group);
+	if(flags & BoardPrintChain){
+
+		for(iy=0;iy<this->height;iy++){
+			BoardIndent(this);
+			printf(" %2d |",iy);
+			for(ix=0;ix<this->width;ix++){
+				Cell *cell = BoardGetCellPtr(this,ix,iy);
+				if(cell->color == CellColorGray){
+					printf("  (%3d,%3d)",cell->group,cell->chainNum);
+				}else if(cell->color == CellColorWhite){
+					if(BoardCellIsCompletedWhite(this,cell)){
+						printf("%2d(%3d,%3d)",cell->chainNum,cell->group,cell->chainNum);
 					}else{
-						printf("%2d(%3d)",v,cell->group);
+						int v = BoardDataGetData(this->data,ix,iy);
+						if(v == 0){
+							printf(" .(%3d,%3d)",cell->group,cell->chainNum);
+						}else{
+							printf("%2d(%3d,%3d)",v,cell->group,cell->chainNum);
+						}
 					}
+				}else{
+					printf(" X(%3d,%3d)",cell->group,cell->chainNum);
 				}
-			}else{
-				printf(" X(%3d)",cell->group);
 			}
+			printf("\n");
 		}
-		printf("\n");
+	
+	}else{
+	
+		for(iy=0;iy<this->height;iy++){
+			BoardIndent(this);
+			printf(" %2d |",iy);
+			for(ix=0;ix<this->width;ix++){
+				Cell *cell = BoardGetCellPtr(this,ix,iy);
+				if(cell->color == CellColorGray){
+					printf("  (%3d)",cell->group);
+				}else if(cell->color == CellColorWhite){
+					if(BoardCellIsCompletedWhite(this,cell)){
+						printf("%2d(%3d)",cell->chainNum,cell->group);
+					}else{
+						int v = BoardDataGetData(this->data,ix,iy);
+						if(v == 0){
+							printf(" .(%3d)",cell->group);
+						}else{
+							printf("%2d(%3d)",v,cell->group);
+						}
+					}
+				}else{
+					printf(" X(%3d)",cell->group);
+				}
+			}
+			printf("\n");
+		}
 	}
+	
 	BoardIndent(this);
 	printf("--[%d]--\n",solveStep);
+}
+
+void BoardPrint(Board *this){
+	BoardPrintWithFlag(this,this->printFlag);
 }
 
 void BoardPrintDist(Board *this){
@@ -1543,16 +1562,13 @@ int solveBranch(Board *board){
 		return 0;		
 	}
 	
-	//Point *points = BoardAllocPointArray(board);
-	//int pointsLen = 0;
-	
+
 	Cell **cells = BoardAllocCellPtrArray(board);
 	int cellsLen = 0;
 		
 	BoardGetCellsOfGroupAroundColor(board,cells,&cellsLen,group,CellColorGray);
 	
-	//BoardGetGroupAroundColor(board,points,&pointsLen,group,CellColorGray);
-	
+
 	BoardIndent(board);
 	printf("branch group=%d:branch num:%d\n",group,cellsLen);
 	BoardPrint(board);
@@ -1569,7 +1585,6 @@ int solveBranch(Board *board){
 	for(i=0;i<cellsLen;i++){
 		//この中のどれかが正解であるはず。全部だめなら問題が解無し。
 		
-		
 		//複製
 		Board next;
 		BoardInitWithBoard(&next,board);
@@ -1581,7 +1596,7 @@ int solveBranch(Board *board){
 		BoardIndent(board);
 		printf("branch[%d/%d]  group=%d -> (%d,%d)\n",i,cellsLen,group,x,y);
 		BoardCellSetColor(&next,x,y,CellColorWhite);
-		BoardPrint(&next);
+		//BoardPrint(&next);
 		ret = solve(&next);
 		
 		BoardRelease(&next);
@@ -1669,24 +1684,21 @@ int solve(Board *board){
 		}
 
 		
-		
+/*		
 		num = BoardCellSetBlackSurroundedGray(board);
 		if(board->error)return 0;
 		
 		if(num>0){
 			continue;
 		}
-
-		 
+*/
 		
 		num = BoardCellExpandWhite(board);
+		if(board->error)return 0;
 		if(num > 0){
 			//	printf("depth %d , expand white +%d\n",depth,num);
 			//	BoardPrint(board);
 			continue;
-		}
-		if(board->error){
-			return 0;
 		}
 		
 		num = BoardCellExpandBlack(board);
@@ -1711,6 +1723,9 @@ int solve(Board *board){
 		}
 
 		BoardCheckBlackSplit(board);
+		if(board->error)return 0;
+		
+		BoardCheckWhiteSplit(board);
 		if(board->error)return 0;
 		
 		
@@ -1749,6 +1764,7 @@ int main(int argc,char *argv[]){
 	
 	Board board;
 	BoardInitWithData(&board,&bData);
+	board.printFlag = 0;
 
 	solveStep = 0;
 	int ret = solve(&board);
