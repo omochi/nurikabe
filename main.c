@@ -1702,7 +1702,7 @@ void BoardPrintWithFlag(Board *this,int flags){
 	}
 	
 	BoardIndent(this);
-	printf("--[%d]--\n",solveStep);
+	printf("--[step=%d,open=%d,gray=%d,score=%d]--\n",solveStep,openNodesLen,this->grayCellNum,BoardGetScore(this));
 }
 
 void BoardPrint(Board *this){
@@ -1847,7 +1847,8 @@ int BoardCellWhiteGroupRemain(Board *this,Cell *cell){
 int BoardGetScore(Board *this){
 	if(this->grayCellNum == 0)return 0;
 	//return this->grayCellNum * this->depth;
-	return this->grayCellNum + this->depth * 5;
+	//return this->grayCellNum + this->depth * 5;
+	return this->grayCellNum;
 }
 
 int BoardFindNextBranchGroup(Board *this){
@@ -1871,7 +1872,7 @@ int BoardFindNextBranchGroup(Board *this){
 		if(value == 0)continue;//数字なしグループは拒否
 		
 		int cellRemain = value - grpCell->chainNum;
-		//ASSERT(0<=cellRemain);
+		ASSERT(0<=cellRemain);
 		if(cellRemain == 0)continue;//完成しているところは伸ばさない
 		
 		if(cellRemain < remain){
@@ -1904,6 +1905,8 @@ int solveSingle(Board *board){
 	//固定計算を進める
 	while(1){
 		int num= 0;
+		if(board->error)return 0;
+		
 		num = BoardCellSetBlackSplitWhite(board);
 		if(board->error)return 0;
 		if(num > 0)continue;
@@ -2020,73 +2023,29 @@ void solveBranch(Board *board){
 		BoardIndent(board);
 		printf("branch[%d/%d]  group=%d -> (%d,%d)\n",i,cellsLen,group,x,y);
 		BoardCellSetColor(&next,x,y,CellColorWhite);
-		//BoardPrint(&next);
-		//ret = solve(&next);
-		
 		ret = solveSingle(&next);
 		if(ret == 0){
 			//すでにおかしいノードは切り捨て
+			//ここが黒だとわかるので自己を更新
+			BoardIndent(board);
+			printf("branch[%d/%d]fail : black fixed (%d,%d)\n",i,cellsLen,x,y);
+			BoardCellSetColor(board,x,y,CellColorBlack);
+			ret = solveSingle(board);
+			if(ret==0){
+				//このノードは死にました
+				BoardIndent(board);
+				printf("branch all fail\n");
+				//getchar();
+				break;
+			}
 		}else{
 			//追加
-			
 			solveAddToOpen(&next);
-				
 		}
-		
-		//BoardRelease(&next);
-		
-		/*
-		if(ret == 0){
-			//白が違ったなら黒。確定して次を試す。
-			BoardIndent(board);
-			printf("white fail -> black (%d,%d)\n",x,y);
-			BoardCellSetColor(board,x,y,CellColorBlack);
-			
-		}else{
-			//成功を返却する
-			SAFE_FREE(cells);
-			return 1;
-		}
-		 */
+
 	}
 	
-	/*
-	//黒を伸ばしてみる
-	Cell **groups = BoardAllocCellPtrArray(board);
-	int groupsLen = 0;
-	BoardGetGroupsByCellWithColor(board,groups,&groupsLen,CellColorBlack);
-	for(i=0;i<groupsLen;i++){
-		Cell *grpCell = groups[i];
-		
-		BoardGetGroupAroundColor(board,points,&pointsLen,grpCell->group,CellColorGray);
-		printf("depth %d:black expand branch:group=%d\n",depth,grpCell->group);
-		
-		int j;
-		for(j=0;j<pointsLen;j++){
-			Board next;
-			BoardInitWithBoard(&next,board);
-	 		next.depth++;
-			int x = points[j].x;
-			int y = points[j].y;
-			BoardCellSetColor(&next,x,y,CellColorBlack);
-			ret = solve(&next,depth+1);
-			BoardRelease(&next);
-			
-			if(ret == 0){
-				
-			}else{
-				SAFE_FREE(points);
-				SAFE_FREE(groups);
-				return 1;
-			}
-			
-			
-		}
-		
 	
-	}
-	SAFE_FREE(groups);
-	 */
 	SAFE_FREE(cells);
 }
 
@@ -2181,7 +2140,7 @@ int main(int argc,char *argv[]){
 		BoardArrayInsert(openNodes,&openNodesLen,&openNodesReserve,0,&board);
 	}
 	
-	ret = solve(&board);
+	ret = solve();
 	
 	printf("solve step : %d\n",solveStep);
 
