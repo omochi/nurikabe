@@ -1,4 +1,4 @@
-CFLAGS += -Wall -O3
+CFLAGS += -Wall -Wextra -Werror  -O3
 all : main
 main : main.o OMMem.o
 clean : 
