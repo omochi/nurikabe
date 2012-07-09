@@ -424,7 +424,6 @@ void BoardCellGroupJoin(Board *this,Cell *lhs,Cell *rhs){
 			printf("group join(%d) grp=%d(%d,%d) x grp=%d(%d,%d) error!\n",lhs->color,
 				   lhs->group,lhs->head.x,lhs->head.y,
 				   rhs->group,rhs->head.x,rhs->head.y);
-			//BoardPrint(this);
 		}
 	}else if(lhs->color == CellColorBlack){
 		BoardCellChangeGroup(this,lhs,rhs->group,rhs->head,chainNum);
@@ -478,7 +477,6 @@ void BoardCellWhiteChainOnChanged(Board *this,Cell *cell){
 			this->error = 1;
 			BoardIndent(this);
 			printf("white size over error! (%d,%d) chain=%d > %d\n",cell->pos.x,cell->pos.y,cell->chainNum,value);
-			//BoardPrint(this);
 		}
 	}	
 }
@@ -976,13 +974,16 @@ int BoardGetGroupsByCellWithColor(Board *this,Cell **result,int *retNum,int colo
 	return num;
 }
 
+//markで取るマークを指定する
+//もしmark=0だと0でないマーク全てとる
 int BoardGetCellsOfMarkAroundColor(Board *this,Cell **result,int *num,int mark,int color){
 	int iy,ix;
 	*num = 0;
 	for(iy = 0;iy<this->height;iy++){
 		for(ix=0;ix<this->width;ix++){
 			Cell *cell = BoardGetCellPtr(this,ix,iy);
-			if(cell->mark == mark){
+			if((mark==0 && cell->mark!=0) || 
+			   (mark!=0 && cell->mark == mark)){
 				Cell *chk;
 				
 				chk = BoardGetCellPtr(this,ix-1,iy);
@@ -1106,9 +1107,7 @@ int BoardCellExpandBlack(Board *this){
 				this->error = 1;
 				BoardIndent(this);
 				printf("black split error! grp=%d (%d,%d)\n",grpCell->group , grpCell->head.x,grpCell->head.y);
-				//BoardPrint(this);
-				break;
-				
+				break;				
 			}
 		}
 	}
@@ -1148,7 +1147,6 @@ markend:
 			if(cell->color == CellColorBlack && cell->mark == 0){
 				BoardIndent(this);
 				printf("black split error  ! (%d,%d)\n",ix,iy);
-				//BoardPrint(this);
 				this->error = 1;
 				goto checkend;
 			}
@@ -1277,9 +1275,7 @@ int BoardCellSetBlackUnreachable(Board *this){
 				BoardIndent(this);
 				printf("white cell area is lacking!! rem=%d , space=%d , grp=%d(%d,%d)\n",
 					   rem,cellsLen,valueCell->group,valueCell->pos.x,valueCell->pos.y);
-				BoardPrint(this);
-				BoardPrintDist(this);
-				//getchar();
+
 				this->error = 1;
 				goto endchk;
 			}else if(cellsLen == rem){
@@ -1288,15 +1284,12 @@ int BoardCellSetBlackUnreachable(Board *this){
 				BoardIndent(this);
 				printf("white cell fill fixed. rem=%d, space =%d , grp=%d(%d,%d)\n",
 					   rem,cellsLen,valueCell->group,valueCell->pos.x,valueCell->pos.y);
-				BoardPrint(this);
-				BoardPrintDist(this);
-				//getchar();
+
 				for(j=0;j<cellsLen;j++){
 					BoardCellAddToWhiteGroup(this,cells[j],valueCell);
 					num++;
 				}
-				BoardPrint(this);
-				//getchar();
+
 				goto endchk;
 			}
 					
@@ -1342,9 +1335,7 @@ int BoardCellSetBlackUnreachable(Board *this){
 						BoardIndent(this);
 						printf("cant reach 2 (%d,%d) from head error\n",
 							   cell->pos.x,cell->pos.y);
-						BoardPrint(this);
 						this->error = 1;
-					//	getchar();
 						goto endchk;
 						
 					}
@@ -1579,49 +1570,10 @@ void BoardPrintMark(Board *this){
 	}
 }
 
+//異常状態の発生は操作ごとに検出しているので、
+//グレーセルが無いならクリアしているはず。
 int BoardIsSolved(Board *this){
-	int iy,ix;
-	
-	int blackGroup = 0;
-	
-	//BoardPrint(this);
-	
-	for(iy=0;iy<this->height;iy++){
-		for(ix=0;ix<this->width;ix++){
-			Cell *cell = BoardGetCellPtr(this,ix,iy);
-			int value = BoardCellGetHeadData(this,cell);
-			
-			if(cell->color ==CellColorGray){
-				//BoardIndent(this);
-				//printf("solved check : there is gray(%d,%d)\n",ix,iy);
-				//塗り終わっていない
-				return 0;
-			}else if(cell->color == CellColorWhite){
-				//白の長さが正しい
-				if(cell->chainNum != value){
-					//BoardIndent(this);
-					//printf("solved check : white num chain=%d != %d (%d,%d)=>(%d,%d)\n",cell->chainNum,value,ix,iy,
-					//	   cell->head.x,cell->head.y);
-					return 0;
-				}
-			}else if(cell->color ==CellColorBlack){
-				//黒が1連結
-				if(blackGroup == 0){
-					blackGroup = cell->group;
-				}else{
-					if(blackGroup != cell->group){
-					//	BoardIndent(this);
-					//	printf("solved check : black group over\n");
-						return 0;
-					}
-				}
-			}
-		}
-	}
-	
-	//BoardPrint(this);
-	
-	return 1;
+	return this->grayCellNum == 0;
 }
 
 int BoardCalcGrayCellNum(Board *this){
@@ -1648,6 +1600,23 @@ int BoardGetScore(Board *this){
 	//return this->grayCellNum * this->depth;
 	//return this->grayCellNum + this->depth * 5;
 	return this->grayCellNum;
+}
+
+//白が次に伸びうる場所全部
+int BoardGetCellsOfWhiteNextExpansion(Board *this,Cell **result,int *resultLen){
+	*resultLen = 0;
+	
+	Cell **area = BoardAllocCellPtrArray(this);
+	int areaLen = 0;
+	
+	//白をマークで塗り分ける
+	BoardWhiteCellAreaMark(this,area,&areaLen);
+	//マークされたセル全ての周りを取る(mark==0)
+	BoardGetCellsOfMarkAroundColor(this,result,resultLen,0,CellColorGray);
+
+	SAFE_FREE(area);
+	
+	return *resultLen;
 }
 
 int BoardFindNextBranchGroup(Board *this){
@@ -1701,37 +1670,36 @@ int BoardFindNextBranchGroup(Board *this){
 
 //0:fail 1:ok
 int solveSingle(Board *board){
+	int ret = 0;
 	//固定計算を進める
-	while(1){
-		BoardCalcGrayCellNum(board);
-		
+	while(1){		
 		int num= 0;
-		if(board->error)return 0;
+		if(board->error)break;
 		
 		num = BoardCellSetBy3x3(board);
-		if(board->error)return 0;
+		if(board->error)break;
 		if(num>0)continue;
 		
 		num = BoardCellExpandWhite(board);
-		if(board->error)return 0;
+		if(board->error)break;
 		if(num > 0)continue;
 		
 		num = BoardCellExpandBlack(board);
-		if(board->error)return 0;
+		if(board->error)break;
 		if(num > 0)continue;
 		
 		num = BoardCellSetBlackUnreachable(board);
-		if(board->error)return 0;
+		if(board->error)break;
 		if(num>0)continue;
 		
 		BoardCheckBlackSplit(board);
-		if(board->error)return 0;
-
-		BoardCalcGrayCellNum(board);
+		if(board->error)break;
 		
+		ret = 1;
 		break;
 	}
-	return 1;
+	BoardCalcGrayCellNum(board);
+	return ret;
 }
 
 void solveAddToOpen(Board *node){
@@ -1758,7 +1726,6 @@ void solveAddToOpen(Board *node){
 		}
 	}
 	
-	
 	idx = BoardArrayFindByScore(openNodes,&openNodesLen,score);
 	if(idx==-1){
 		idx = openNodesLen;
@@ -1767,90 +1734,97 @@ void solveAddToOpen(Board *node){
 	
 }
 
-void solveBranch(Board *board){
+int solveBranch(Board *board){
 	int ret = 0;
-
-	int group = BoardFindNextBranchGroup(board);
-	if(group == 0){
-		BoardIndent(board);
-		printf("no next branch group\n");
-		return;	
-	}
-
 	Cell **cells = BoardAllocCellPtrArray(board);
 	int cellsLen = 0;
-		
-	BoardGetCellsOfGroupAroundColor(board,cells,&cellsLen,group,CellColorGray);
-
-	BoardIndent(board);
-	printf("branch group=%d:branch num:%d\n",group,cellsLen);
-	BoardPrint(board);
 	
-	ASSERT(cellsLen != 1);//1なら事前にぬったはず
-	if(cellsLen==0){
-		//詰んでる
-		SAFE_FREE(cells);
-		return;
-	}
-	
-	//ここで選択肢が出なかった場合はそのままret = 0を返却する
+	int childrenReserve = board->width * board->height;
+	Board *children = BoardArrayAlloc(childrenReserve);
+	int childrenLen = 0;
 	int i;
-	for(i=0;i<cellsLen;i++){
-		//この中のどれかが正解であるはず。全部だめなら問題が解無し。
-		
-		//複製
-		Board next;
-		BoardInitWithBoard(&next,board);
-		next.depth++;
-		
-		int x = cells[i]->pos.x;
-		int y = cells[i]->pos.y;
-		
-		BoardIndent(board);
-		printf("branch[%d/%d]  group=%d -> (%d,%d)\n",i,cellsLen,group,x,y);
-		BoardCellSetColor(&next,BoardGetThisCellPtr(&next,cells[i]),CellColorWhite);
-		ret = solveSingle(&next);
-		if(ret == 0){
-			
-			BoardRelease(&next);
-			
-			//すでにおかしいノードは切り捨て
-			//ここが黒だとわかるので自己を更新
-			BoardIndent(board);
-			printf("branch[%d/%d]fail : black fixed (%d,%d)\n",i,cellsLen,x,y);
-			BoardCellSetColor(board,BoardGetThisCellPtr(board,cells[i]),CellColorBlack);
-			ret = solveSingle(board);
-			if(ret==0){
-				//このノードは死にました
-				BoardIndent(board);
-				printf("branch all fail\n");
-				//getchar();
-				break;
-			}
-		}else{
-			//追加
-			solveAddToOpen(&next);
+	
+	while(1){
+		for(i=0;i<childrenLen;i++){
+			BoardRelease(&children[i]);
 		}
+		childrenLen = 0;
+		if(board->error)break;
+		
+		if(BoardIsSolved(board)){
+			ret = 1;
+			break;
+		}
+				
+		BoardGetCellsOfWhiteNextExpansion(board,cells,&cellsLen);
+ 
+		if(cellsLen == 0){
+			BoardIndent(board);
+			printf("next expansion is none\n");
+			board->error = 1;
+			continue;
+		}
+		
+		for(i=0;i<cellsLen;i++){
+			Cell *cell = cells[i];
+			Board test;
+			BoardInitWithBoard(&test,board);
+			test.depth++;
+			BoardCellSetColor(&test,BoardGetThisCellPtr(&test,cell),CellColorWhite);
+			ret = solveSingle(&test);
+			if(ret == 0){
+				//白失敗で黒確定
+				BoardIndent(board);
+				printf("white expand fail => black fixed (%d,%d)\n",cell->pos.x,cell->pos.y);
+				
+				BoardRelease(&test);
+				
+				BoardCellSetColor(board,BoardGetThisCellPtr(board,cell),CellColorBlack);
+				ret = solveSingle(board);
+				if(ret == 0){
+					BoardIndent(board);
+					printf("branch black fixed error\n");
+					board->error = 1;
+				}
+				//リストを取るところからやりなおす
+				break;
+			}else{
+				//白成功を溜め込む
+				BoardArrayInsert(children,&childrenLen,&childrenReserve,childrenLen,&test);
+			}
+		}
+		if(i<cellsLen)continue;
+		
+		ASSERT(cellsLen == childrenLen);
+		//全部追加できたならオープンに追加して終わり
+		BoardIndent(board);
+		printf("add branches(%d):",childrenLen);
+		for(i=0;i<cellsLen;i++){
+			Cell *cell = cells[i];
+			printf("(%d,%d),",cell->pos.x,cell->pos.y);
+			solveAddToOpen(&children[i]);
+		}
+		childrenLen = 0;
+		printf("\n");
+		BoardPrint(board);
+		
+		ret = 1;
+		break;		
 	}
 	
+	SAFE_FREE(children);
 	SAFE_FREE(cells);
+	
+	return ret;
 }
-
-
 
 //0:fail 1:solved
 int solve(){
 	int solved = 0;
 	
-	while(openNodesLen>0){
+	while(openNodesLen>0 && solved==0){
 		solveStep ++ ;
-		
-		/*
-		if(solveStep%100==0){
-			OMMemChainPrint();
-			getchar();
-		}*/
-		
+	
 		int i;
 		
 		printf("step:%d , openNodeList(%d):",solveStep,openNodesLen);
@@ -1866,20 +1840,17 @@ int solve(){
 		Board board = openNodes[0];
 		BoardArrayRemove(openNodes,&openNodesLen,&openNodesReserve,0);
 		
+		//以下分岐処理
+		solveBranch(&board);
+		
 		if(BoardIsSolved(&board)){
 			BoardIndent(&board);
 			printf("==>solved ! step = %d\n",solveStep);
 			BoardPrint(&board);
 			BoardIndent(&board);
 			printf("==<solved ! step = %d\n",solveStep);
-			solved = 1;
-			
-			BoardRelease(&board);
-			break;
+			solved = 1;//ループ抜ける
 		}
-
-		//以下分岐処理
-		solveBranch(&board);
 		
 		BoardRelease(&board);
 	}
@@ -1932,7 +1903,7 @@ int main(int argc,char *argv[]){
 	ret = solve();
 	
 	if(!ret){
-		printf("solve failed step %d\n",solveStep);
+		printf("==solve failed ... step = %d\n",solveStep);
 	}
 
 	SAFE_FREE(openNodes);
