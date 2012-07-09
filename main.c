@@ -32,6 +32,13 @@ int BoardArrayFindByScore(Board *array,int *len,int score){
 	}
 	return -1;
 }
+int BoardArrayFindSame(Board *array,int *len,Board *find){
+	int i;
+	for(i=0;i<*len;i++){
+		if(BoardIsSame(find,&array[i]))return i;
+	}
+	return -1;
+}
 
 Point PointMake(int x,int y){
 	Point p;
@@ -200,6 +207,7 @@ int BoardCellGetHeadData(Board *this,Cell *cell){
 
 int BoardIsSame(Board *lhs,Board *rhs){
 	int iy,ix;
+	if(lhs->grayCellNum != rhs->grayCellNum)return 0;
 	ASSERT(lhs->width == rhs->width && lhs->height == rhs->height);
 	for(iy=0;iy<lhs->height;iy++){
 		for(ix=0;ix<lhs->width;ix++){
@@ -691,6 +699,22 @@ int BoardGetCellsOfWhiteExpansionFromDist(Board *this,Cell **result,int *resultL
 	return num;
 }
 
+int BoardGetCellsOfGroup(Board *this,Cell **result,int *resultLen,int group){
+	int iy,ix;
+	int num = 0;
+	for(iy=0;iy<this->height;iy++){
+		for(ix=0;ix<this->width;ix++){
+			Cell *cell = BoardGetCellPtr(this,ix,iy);
+			if(cell->group == group){
+				if(result!=NULL)result[num] = cell;
+				num++;
+			}
+		}
+	}
+	if(resultLen!=NULL)*resultLen = num;
+	return num;
+}
+
 //ダイクストラ法2
 //同一グループ間は距離を消耗せずに移動する
 void BoardCalcGroupDistance(Board *this,Cell *start){
@@ -1062,6 +1086,25 @@ int BoardCellSetBlackUnreachable(Board *this){
 				goto endchk;
 			}
 					
+		}else if(rem==0){
+			//サイズチェック
+			int size = BoardGetCellsOfGroup(this,cells,&cellsLen,valueCell->group);
+			int value =BoardCellGetHeadData(this,valueCell);
+			//BoardIndent(this);
+			//printf("white cell(%d,%d/grp=%d) area size=%d , value=%d\n",
+			//	   valueCell->pos.x,valueCell->pos.y,valueCell->group,size,value);
+			//getchar();
+			if(size != value){
+				BoardIndent(this);
+				printf("white cell(%d,%d/grp=%d) area=size %d != value=%d\n",
+					   valueCell->pos.x,valueCell->pos.y,valueCell->group,size,value);
+				this->error = 1;
+				getchar();
+				goto endchk;
+			}
+				
+		}else{
+			ASSERT(0);
 		}
 	}
 	
@@ -1239,10 +1282,8 @@ void BoardPrintWithFlag(Board *this,int flags){
 					int value = BoardCellGetHeadData(this,cell);
 					if(data != 0){
 						printf("%2d(%3d,%3d)",data,cell->group,cell->chainNum);
-						
 					}else if(value != 0){
 						printf(" +(%3d,%3d)",cell->group,cell->chainNum);
-						
 					}else{
 						printf(" .(%3d,%3d)",cell->group,cell->chainNum);
 					}
@@ -1269,10 +1310,8 @@ void BoardPrintWithFlag(Board *this,int flags){
 					int value = BoardCellGetHeadData(this,cell);
 					if(data != 0){
 						printf("%2d(%3d)",data,cell->group);
-						
 					}else if(value != 0){
 						printf(" +(%3d)",cell->group);
-						
 					}else{
 						printf(" .(%3d)",cell->group);
 					}
@@ -1393,7 +1432,7 @@ void BoardPrintMark(Board *this){
 //異常状態の発生は操作ごとに検出しているので、
 //グレーセルが無いならクリアしているはず。
 int BoardIsSolved(Board *this){
-	return this->grayCellNum == 0;
+	return this->error==0 && this->grayCellNum == 0;
 }
 
 int BoardCalcGrayCellNum(Board *this){
@@ -1418,8 +1457,8 @@ int BoardCellGetWhiteGroupRemain(Board *this,Cell *cell){
 int BoardGetScore(Board *this){
 	if(this->grayCellNum == 0)return 0;
 	//return this->grayCellNum * this->depth;
-	//return this->grayCellNum + this->depth * 5;
-	return this->grayCellNum;
+	return this->grayCellNum + this->depth * 5;
+	//return this->grayCellNum;
 }
 
 //白が次に伸びうる場所全部
@@ -1476,24 +1515,19 @@ int solveSingle(Board *board){
 void solveAddToOpen(Board *node){
 	int idx;
 	int score = BoardGetScore(node);
-	idx= BoardArrayFindByScore(openNodes,&openNodesLen,score);
-	if(idx>=0){
-		//同じ盤面か？
-		if(BoardIsSame(node,&openNodes[idx])){
-			
-			int openScore = BoardGetScore(&openNodes[idx]);
-			//printf("same board ! new=%d , open=%d\n",score,openScore);	
-			if(openScore <= score){
-				BoardRelease(node);
-				//すでにある奴の方がいいなら追加しない
-				return;
-			}else{
-				//こっちのほうがいいなら今のを消す
-				Board opened = openNodes[idx];
-				BoardArrayRemove(openNodes,&openNodesLen,&openNodesReserve,idx);
-				BoardRelease(&opened);
-			}
-			
+
+	idx = BoardArrayFindSame(openNodes,&openNodesLen,node);
+	if(idx >= 0){
+		int openScore = BoardGetScore(&openNodes[idx]);
+		if(openScore <= score){
+			BoardRelease(node);
+			//すでにある奴の方がいいなら追加しない
+			return;
+		}else{
+			//こっちのほうがいいなら今のを消す
+			Board opened = openNodes[idx];
+			BoardArrayRemove(openNodes,&openNodesLen,&openNodesReserve,idx);
+			BoardRelease(&opened);
 		}
 	}
 	
@@ -1502,7 +1536,6 @@ void solveAddToOpen(Board *node){
 		idx = openNodesLen;
 	}
 	BoardArrayInsert(openNodes,&openNodesLen,&openNodesReserve,idx,node);
-	
 }
 
 int solveBranch(Board *board){
@@ -1591,7 +1624,7 @@ int solveBranch(Board *board){
 		printf("\n");
 		
 		BoardPrint(board);
-		getchar();
+		//getchar();
 		
 		ret = 1;
 		break;		
@@ -1626,12 +1659,15 @@ int solve(){
 		BoardArrayRemove(openNodes,&openNodesLen,&openNodesReserve,0);
 		
 		//以下分岐処理
-		solveBranch(&board);
+		int ret = solveBranch(&board);
 		
-		if(BoardIsSolved(&board)){
+		if(ret && BoardIsSolved(&board)){
 			BoardIndent(&board);
 			printf("==>solved ! step = %d\n",solveStep);
 			BoardPrint(&board);
+			
+			BoardPrintWithFlag(&board,BoardPrintGroup);
+			
 			BoardIndent(&board);
 			printf("==<solved ! step = %d\n",solveStep);
 			solved = 1;//ループ抜ける
