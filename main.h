@@ -44,7 +44,8 @@ typedef enum{
 }CellColor;
 
 typedef enum{
-	BoardPrintChain = 1,
+	BoardPrintGroup = 1,
+	BoardPrintChain = 2,
 }BoardPrintFlag;
 
 struct Cell_t;
@@ -62,6 +63,7 @@ struct Cell_t{
 	int mark;
 	int dist;
 	Cell *markCell;
+	int markDist;//マークした時のdist
 };
 
 typedef struct{
